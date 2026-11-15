@@ -106,6 +106,31 @@ def _loopback_origin(origin: str) -> bool:
     return hostname is not None and (hostname == "localhost" or is_loopback_ip(hostname))
 
 
+def page_bind_hosts(host: str) -> list[str]:
+    """Every address the served page listens on, loopback first.
+
+    ``gateway.page.host`` adds a second address so another machine can open the
+    page; loopback is not replaced, because `raven web`, the desktop shell and
+    every sign-in link are built for it. A wildcard already covers loopback, so
+    it is bound alone rather than doubled up.
+    """
+    extra = (host or "").strip()
+    if not extra or extra in {"127.0.0.1", "localhost"}:
+        return ["127.0.0.1"]
+    if extra in {"0.0.0.0", "::"}:
+        return [extra]
+    return ["127.0.0.1", extra]
+
+
+def _origin_hostname(origin: str) -> str:
+    """The hostname ``origin`` names, folded for comparison, or ``""``."""
+    try:
+        hostname = urlsplit(origin).hostname
+    except ValueError:
+        return ""
+    return (hostname or "").lower().rstrip(".")
+
+
 _COOKIE_MAX_AGE_S = 30 * 24 * 60 * 60
 """How long a browser keeps the session cookie.
 
@@ -153,6 +178,9 @@ class WsGateway:
         self.agent_loop_factory: Any = None
         self.a2a_handler: Any = None
         self.port: int = DEFAULT_PORT
+        # ``gateway.page.allowedOrigins``: the names the page answers besides
+        # loopback. Empty -- the default -- keeps the loopback-only policy.
+        self.allowed_origins: tuple[str, ...] = ()
 
     def mint_nonce(self) -> str:
         """Issue a one-time sign-in nonce, valid for :data:`_NONCE_TTL_S`.
@@ -251,14 +279,33 @@ class WsGateway:
         that page's requests arrive carrying this session's cookie. The second
         refuses DNS rebinding, where a name resolving to 127.0.0.1 asks its own
         origin and the two agree.
+
+        A page reached by name -- a tailnet name, a LAN DNS name -- is not on
+        loopback and has no other way in, so ``gateway.page.allowedOrigins``
+        names the hosts this deployment answers under. The Origin-equals-Host
+        half is not relaxed by that: a page somewhere else cannot borrow a name
+        it does not serve.
         """
         origin = request.headers.get("Origin")
         if origin is None:
             return True
-        if origin in (f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"):
+        origin_lower = origin.lower()
+        if origin_lower in (
+            f"http://127.0.0.1:{self.port}",
+            f"http://localhost:{self.port}",
+        ):
             return True
-        host = request.headers.get("Host", "")
-        return origin.lower() == f"http://{host.lower()}" and _loopback_origin(origin)
+        host = request.headers.get("Host", "").lower()
+        # Both schemes: an allowed name may be fronted by TLS (``tailscale
+        # serve`` and other tailnet terminators), and the browser then sends an
+        # https Origin even though this process speaks http behind it.
+        if origin_lower not in (f"http://{host}", f"https://{host}"):
+            return False
+        if _loopback_origin(origin):
+            return True
+        return _origin_hostname(origin) in {
+            name.strip().lower().rstrip(".") for name in self.allowed_origins if name.strip()
+        }
 
     # ---- handlers ------------------------------------------------------------
 

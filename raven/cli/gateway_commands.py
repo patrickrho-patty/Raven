@@ -872,7 +872,9 @@ def register(app: typer.Typer) -> None:  # noqa: C901 (cc 87: pre-existing, abov
                     from raven.cli._gateway_page import mount_page
 
                     try:
-                        page_mount = await mount_page(agent, page_on, linked_chat=linked_chat)
+                        page_mount = await mount_page(
+                            agent, page_on, linked_chat=linked_chat, page_config=config.gateway.page
+                        )
                     except OSError as exc:
                         logger.warning("page mount failed ({}); gateway continues without the page", exc)
                 if page_mount is not None:

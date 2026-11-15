@@ -368,3 +368,74 @@ async def test_the_mounted_page_says_when_it_is_behind_its_sources(home: Path, t
                 assert resp.headers["Cache-Control"] == "no-cache"
     finally:
         await mount.teardown()
+
+
+async def test_a_named_host_can_sign_in_and_nothing_else_can(home: Path) -> None:
+    """A browser that reaches the page by name offers that name as its Origin
+    and has no loopback name to fall back on, so the loopback-only rule refused
+    it and the tab could never sign in. ``gateway.page.allowedOrigins`` is the
+    way in, and it does not relax the Origin-equals-Host half: a page somewhere
+    else cannot reach the API by borrowing a declared name.
+    """
+    import aiohttp
+
+    from raven.cli._gateway_page import mount_page
+    from raven.config.schema import GatewayPageConfig
+
+    name = "box.tailnet.ts.net"
+    page = GatewayPageConfig(host="127.0.0.1", allowed_origins=[name])
+    mount = await mount_page(_FakeLoop(_FakeCron()), 18980, page_config=page)
+    assert mount is not None
+    try:
+        token = json.loads((home / "serve.json").read_text(encoding="utf-8"))["token"]
+        named = {"Host": f"{name}:{mount.port}", "Origin": f"http://{name}:{mount.port}"}
+        async with aiohttp.ClientSession() as session:
+            # The declared name signs in, and the socket it opens is accepted --
+            # which is what the page needs before it can show anything.
+            async with session.post(f"{mount.url}/auth/exchange", headers=named, json={"token": token}) as resp:
+                assert resp.status == 200
+                cookie = resp.headers["Set-Cookie"].split(";")[0]
+            async with session.ws_connect(f"{mount.url}/rpc", headers={**named, "Cookie": cookie}) as ws:
+                assert not ws.closed
+
+            # A page on another host cannot borrow the declared name.
+            async with session.post(
+                f"{mount.url}/auth/exchange",
+                headers={**named, "Origin": "http://evil.example"},
+                json={"token": token},
+            ) as resp:
+                assert resp.status == 403
+            # Nor does an undeclared name get in by asking its own origin.
+            other = {"Host": f"other.example:{mount.port}", "Origin": f"http://other.example:{mount.port}"}
+            async with session.post(f"{mount.url}/auth/exchange", headers=other, json={"token": token}) as resp:
+                assert resp.status == 403
+    finally:
+        await mount.teardown()
+
+
+def test_page_bind_hosts_keeps_loopback_and_never_doubles_it() -> None:
+    """`raven web`, the desktop shell and every sign-in link are built for
+    loopback, so the configured address is added to it -- unless it already
+    covers it, which a wildcard does and a second bind would answer with
+    EADDRINUSE."""
+    from raven.rpc.transports.ws import page_bind_hosts
+
+    assert page_bind_hosts("") == ["127.0.0.1"]
+    assert page_bind_hosts("127.0.0.1") == ["127.0.0.1"]
+    assert page_bind_hosts("100.64.1.2") == ["127.0.0.1", "100.64.1.2"]
+    assert page_bind_hosts("0.0.0.0") == ["0.0.0.0"]
+    assert page_bind_hosts("::") == ["::"]
+
+
+def test_the_page_config_takes_its_camel_case_keys() -> None:
+    """config.json is written in camelCase, so the two new keys have to be
+    readable in that spelling as well as the python one -- and a pasted URL is
+    reduced to the hostname the origin check actually compares."""
+    from raven.config.schema import GatewayPageConfig
+
+    page = GatewayPageConfig(allowedOrigins=["box.tailnet.ts.net"], host="100.64.1.2")
+    assert page.allowed_origins == ["box.tailnet.ts.net"]
+    assert page.model_dump(by_alias=True)["allowedOrigins"] == ["box.tailnet.ts.net"]
+
+    pasted = GatewayPageConfig(allowedOrigins=["http://box.tailnet.ts.net:18792/", " box.ts.net. "])
+    assert pasted.allowed_origins == ["box.tailnet.ts.net", "box.ts.net"]

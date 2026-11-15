@@ -102,8 +102,18 @@ async def _standalone_serve_owner() -> tuple[int, int] | None:
         return None
 
 
-async def mount_page(agent_loop: Any, preferred_port: int, *, linked_chat: Any = None) -> PageMount | None:
+async def mount_page(
+    agent_loop: Any,
+    preferred_port: int,
+    *,
+    linked_chat: Any = None,
+    page_config: Any = None,
+) -> PageMount | None:
     """Serve the page on ``agent_loop``, on the `raven serve` port policy.
+
+    ``page_config`` is ``gateway.page`` from the loaded config; read here when
+    it is not passed, so the two callers that mount a page -- this one and
+    standalone `raven serve` -- answer the same addresses under the same names.
 
     Returns ``None`` when a live standalone `raven serve` already owns
     serve.json: mounting over it would put two engines on one agent home and
@@ -124,6 +134,11 @@ async def mount_page(agent_loop: Any, preferred_port: int, *, linked_chat: Any =
     from aiohttp import web
     from loguru import logger
 
+    if page_config is None:
+        from raven.config import load_config
+
+        page_config = load_config().gateway.page
+
     from raven.cli._console_feature import register_console_feature
     from raven.cli.serve_commands import (
         _announce_updates,
@@ -136,7 +151,7 @@ async def mount_page(agent_loop: Any, preferred_port: int, *, linked_chat: Any =
     from raven.rpc.bootstrap import build_rpc_stack
     from raven.rpc.serve_control import SERVE
     from raven.rpc.spine import RpcOutlet
-    from raven.rpc.transports.ws import WsGateway, build_app, pick_port
+    from raven.rpc.transports.ws import WsGateway, build_app, page_bind_hosts, pick_port
 
     register_console_feature()
     owner = await _standalone_serve_owner()
@@ -152,6 +167,9 @@ async def mount_page(agent_loop: Any, preferred_port: int, *, linked_chat: Any =
 
     ws_gateway = WsGateway()
     _adopt_credentials(ws_gateway, adopt_stored_cookie)
+    # The names this page answers besides loopback. A browser that reaches it
+    # by name has no loopback Origin to offer, and this is what admits it.
+    ws_gateway.allowed_origins = tuple(page_config.allowed_origins)
     # Same port policy as standalone serve, strict flag included: a relaunch
     # under an open tab (the web supervisor's retry, `system.upgrade`) has to
     # come back on the port that tab is pointed at, and this mount is now what
@@ -175,9 +193,18 @@ async def mount_page(agent_loop: Any, preferred_port: int, *, linked_chat: Any =
     )
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", bound_port)
     try:
-        await site.start()
+        for bind_host in page_bind_hosts(page_config.host):
+            site = web.TCPSite(runner, bind_host, bound_port)
+            try:
+                await site.start()
+            except OSError:
+                # An extra address that is not up -- the tailnet is down, the
+                # interface was renamed -- must not take the page away from the
+                # browser already signed in on loopback.
+                if bind_host == "127.0.0.1":
+                    raise
+                logger.warning("gateway page: cannot bind {}:{} -- serving loopback only", bind_host, bound_port)
     except OSError:
         await stack.teardown()
         await runner.cleanup()

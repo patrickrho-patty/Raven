@@ -418,7 +418,13 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     from loguru import logger
 
     from raven.cli._console_feature import register_console_feature
-    from raven.rpc.transports.ws import WsGateway, build_app, pick_port
+    from raven.config import load_config
+    from raven.rpc.transports.ws import WsGateway, build_app, page_bind_hosts, pick_port
+
+    # ``gateway.page`` is the same section the gateway mounts its own page
+    # from, so standalone serve answers the same addresses under the same
+    # names. Read once here: both are launch-time decisions.
+    page_config = load_config().gateway.page
 
     register_console_feature()
     # Startup tests replace this background warm-up to keep provider
@@ -438,6 +444,8 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     # gateway holds this cookie, and re-minting it here is what made every
     # restart -- including the supervisor's own -- log the user out.
     adopt_stored_cookie(gateway)
+    # The names this page answers besides loopback (``gateway.page``).
+    gateway.allowed_origins = tuple(page_config.allowed_origins)
     # A relaunch after `system.upgrade` must reclaim the exact port the open
     # browser is pointed at, so it asks for strict mode rather than letting the
     # probe wander to the next free port.
@@ -468,8 +476,14 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     )
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", bound_port)
-    await site.start()
+    for bind_host in page_bind_hosts(page_config.host):
+        site = web.TCPSite(runner, bind_host, bound_port)
+        try:
+            await site.start()
+        except OSError:
+            if bind_host == "127.0.0.1":
+                raise
+            logger.warning("serve: cannot bind {}:{} -- serving loopback only", bind_host, bound_port)
 
     stop = asyncio.Event()
     SERVE.arm(bound_port, gateway.session_token, gateway.session_cookie, stop)

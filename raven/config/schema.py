@@ -810,6 +810,48 @@ class GatewayPageConfig(Base):
 
     enabled: bool = True
     port: int = 18792
+    host: str = "127.0.0.1"
+    """Address the page listens on besides loopback.
+
+    Loopback stays bound whatever this says -- ``raven web``, the desktop shell
+    and every sign-in link are built for it, and a page that stopped answering
+    there would strand the browser it was launched for. Setting this to a
+    tailnet or LAN address adds a second listener so another machine can open
+    the page. It is an address, not a name: a name is what
+    ``allowedOrigins`` admits, and the listener is what makes it reachable.
+    """
+    allowed_origins: list[str] = Field(default_factory=list)
+    """Hostnames the page may be served under, beyond loopback.
+
+    A browser that reaches the page by name sends that name as its ``Origin``,
+    which the loopback-only rule refuses: the gateway would have to believe a
+    page it cannot prove is its own. Naming the host here is what admits it,
+    and the request still has to ask its own origin (``Origin`` equals
+    ``Host``), so a page somewhere else cannot borrow the name. A pasted URL
+    is accepted and reduced to its hostname, which is the only part the
+    comparison reads.
+    """
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _origin_names(cls, values: list[str]) -> list[str]:
+        """Keep the hostname, drop what the comparison never reads.
+
+        ``http://box.ts.net:18792`` and ``box.ts.net`` are the same answer to
+        "may this page be here", and a value kept in the URL spelling would
+        match nothing -- the failure that looks like the setting is ignored.
+        """
+        names: list[str] = []
+        for value in values:
+            raw = value.strip()
+            if not raw:
+                continue
+            candidate = raw if "://" in raw else f"//{raw}"
+            host = urlparse(candidate).hostname
+            if not host:
+                raise ValueError(f"allowedOrigins takes hostnames, not {value!r}")
+            names.append(host.rstrip("."))
+        return names
 
 
 TIER_LADDER: tuple[str, ...] = ("medium", "high", "max")
