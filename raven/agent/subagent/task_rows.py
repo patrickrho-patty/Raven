@@ -269,7 +269,7 @@ def _task_status(statuses: list[str]) -> str:
     return "completed"
 
 
-def _spawn_row(files: _NodeFiles, live: set[tuple[str, str]]) -> dict[str, Any]:
+def _spawn_row(files: _NodeFiles, live: set[tuple[str, str]], session_key: str | None = None) -> dict[str, Any]:
     meta = _read_meta(files)
     raw_status = str(meta.get("status") or "")
     error_present = files.path("error.md").is_file()
@@ -297,6 +297,11 @@ def _spawn_row(files: _NodeFiles, live: set[tuple[str, str]]) -> dict[str, Any]:
     started_at = _int_or_none(meta.get("started_at_ms"))
     ended_at = _int_or_none(meta.get("ended_at_ms"))
     call_count = _tool_call_count(meta)
+    last_event_ms = None
+    if status == "running" and session_key:
+        state = run_activity.live_instance(session_key, agent, handle)
+        if state is not None:
+            last_event_ms = state.last_event_ms or state.started_at_ms
 
     node: dict[str, Any] = {
         "node_id": files.node_id,
@@ -307,6 +312,7 @@ def _spawn_row(files: _NodeFiles, live: set[tuple[str, str]]) -> dict[str, Any]:
         "depends_on": [],
         "started_at": started_at,
         "ended_at": ended_at,
+        "last_event_ms": last_event_ms,
         "error": error,
         "tokens_in": _int_or_none(meta.get("tokens_in")),
         "tokens_out": _int_or_none(meta.get("tokens_out")),
@@ -331,13 +337,21 @@ def _spawn_row(files: _NodeFiles, live: set[tuple[str, str]]) -> dict[str, Any]:
     }
 
 
-def spawn_rows(session_dir: Path, only_id: str | None, *, live: set[tuple[str, str]]) -> list[dict[str, Any]]:
-    """One row per spawn, or the one ``only_id`` names; ``live`` is the (agent, handle) pairs in flight."""
+def spawn_rows(
+    session_dir: Path, only_id: str | None, *, live: set[tuple[str, str]], session_key: str | None = None
+) -> list[dict[str, Any]]:
+    """One row per spawn, or the one ``only_id`` names; ``live`` is the (agent, handle) pairs in flight.
+
+    ``session_key`` lets a running row carry the last sign of life the run itself
+    published (:mod:`raven.agent.subagent.activity`), which a reader needs to tell
+    a run that is working from one that is wedged. Absent, the field is ``None``
+    and the row says nothing about it rather than guessing.
+    """
     root = nodes_root(session_dir)
     ids = _spawn_node_ids(session_dir)
     if only_id is not None:
         ids = [nid for nid in ids if nid == only_id]
-    return [_spawn_row(_NodeFiles(root, nid), live) for nid in ids]
+    return [_spawn_row(_NodeFiles(root, nid), live, session_key) for nid in ids]
 
 
 def _dag_node_state(

@@ -6929,3 +6929,32 @@ async def test_a_dag_notice_on_the_page_leaves_open_decisions_to_the_board() -> 
 
     assert submitted[0].text.endswith(reply_rules_note(board_shown=True))
     assert submitted[1].text.endswith(reply_rules_note())
+
+
+async def test_a_spawn_that_stops_reporting_is_announced_once(monkeypatch) -> None:
+    """The spawn lane had no stall watcher: a run wedged on a call that never
+    returned read as running for as long as the process lived (2026-11-16, 56
+    minutes on one silent spawn), and the parent agent was never told. One notice
+    per silent stretch, never one per poll."""
+    import time
+
+    monkeypatch.setattr(manager_mod, "STALL_NOTICE_S", 0.05)
+    sent: list[tuple[str, dict]] = []
+    stub = SimpleNamespace(
+        _inject=lambda content, origin, mark, *, dispatch_link: sent.append((content, mark)) or True,
+        _emit_delivered=lambda origin, payload: None,
+    )
+    did = SimpleNamespace(last_event_ms=int(time.time() * 1000) - 60_000, started_at_ms=0)
+    origin = {"agent": GENERIC_AGENT, "handle": "h1", "session_key": "tui:x"}
+
+    task = asyncio.create_task(
+        SubagentManager._watch_stall(stub, task_id="t1", task_summary="edit a file", did=did, origin=origin)
+    )
+    await asyncio.sleep(0.3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(sent) == 1
+    assert "no sign of life" in sent[0][0]
+    assert sent[0][1]["kind"] == "stalled"

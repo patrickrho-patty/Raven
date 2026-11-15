@@ -55,6 +55,12 @@ _MAX_TOOL_CALLS = 200
 told the reader what kind of run it was, and meta.json is read on every poll of a
 panel that polls every few seconds."""
 
+STALL_NOTICE_S = 600.0
+"""How long a running run may go without a sign of life -- a tool call, a step,
+console bytes -- before the main agent is told. A notice, not a timeout: nothing
+fails the run or moves its status. Read by the DAG node watcher and by the spawn
+watcher, and by the board when it decides whether a run still counts as running."""
+
 
 @dataclass
 class RunActivity:

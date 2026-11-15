@@ -104,7 +104,7 @@ async def tasks_list(
     tasks: list[dict[str, Any]] = []
     if want in (None, "spawn"):
         live = _live_spawn_handles(agent_loop_factory, session_key)
-        tasks.extend(spawn_rows(session_dir, task_id if want == "spawn" else None, live=live))
+        tasks.extend(spawn_rows(session_dir, task_id if want == "spawn" else None, live=live, session_key=session_key))
     if want in (None, "dag"):
         live_runs = _live_dag_run_ids(agent_loop_factory)
         tasks.extend(dag_rows(session_dir, session_key, task_id if want == "dag" else None, live_runs=live_runs))
@@ -169,7 +169,7 @@ class _Running:
 
     def rows_of(self, session: Session) -> Rows:
         """One session's rows as ``tasks.list`` builds them, keyed ``(kind, id)``."""
-        rows = spawn_rows(session.session_dir, None, live=self.spawns.get(session.key, set()))
+        rows = spawn_rows(session.session_dir, None, live=self.spawns.get(session.key, set()), session_key=session.key)
         rows += dag_rows(
             session.session_dir,
             session.key,

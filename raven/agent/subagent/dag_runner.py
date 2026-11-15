@@ -23,6 +23,7 @@ from typing import Any, Protocol
 from loguru import logger
 
 from raven.agent.subagent import activity
+from raven.agent.subagent.activity import STALL_NOTICE_S
 from raven.agent.subagent.backends.base import llm_error_reply, optional_keyword
 from raven.agent.subagent.dag_adjudication import (
     CONTINUE,
@@ -150,16 +151,6 @@ async def _emit(publisher: ProgressPublisher | None, name: str, value: dict) -> 
         await publisher(name, value)
     except Exception:  # noqa: BLE001 - progress must never fail a node
         logger.opt(exception=True).warning("DAG progress publish failed: {}", name)
-
-
-STALL_NOTICE_S = 600.0
-"""How long a running node may go without a sign of life -- a tool call, a step,
-console bytes -- before the main agent is told. A notice, not a timeout: nothing
-is cancelled. Measured 2026-09-01: a coding node sat wedged on one dead LLM call
-for 28 minutes and the only watcher was the owner's own eyes on the TUI; the
-oncall side watches GPU jobs, nobody watched the nodes. Module-level so a test
-can shrink it; per-graph plumbing can follow if one run ever needs another
-value."""
 
 
 async def _watch_stall(

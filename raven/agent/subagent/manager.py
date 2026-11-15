@@ -5,7 +5,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from raven.acp_client import remote_runs
 from raven.agent import workdir
 from raven.agent.context.silence import SILENCE_INSTRUCTION
 from raven.agent.subagent import activity
+from raven.agent.subagent.activity import STALL_NOTICE_S
 from raven.agent.subagent.attachments import retarget_note, with_attachment_note, with_undeliverable_note
 from raven.agent.subagent.backends import (
     ABORTED_ACTION_RESULT,
@@ -1896,6 +1897,9 @@ class SubagentManager:
         # names it as the span that dispatched the turn the report starts.
         link = trace.dispatch_link()
         with activity.collecting(live_key=spawn_live_key(record.dir, call_id), prompt=task) as did:
+            stall_watch = asyncio.create_task(
+                self._watch_stall(task_id=task_id, task_summary=task_summary, did=did, origin=origin)
+            )
             try:
                 backend = self._resolve_backend(agent)
                 # The same message list a direct chat to this handle would carry.
@@ -2062,6 +2066,9 @@ class SubagentManager:
                 )
                 announced = taken is not False
             finally:
+                stall_watch.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stall_watch
                 # Every terminal outcome, including the cancelled one: an id
                 # left at `running` is one no later task can reference and
                 # nothing can free, so the registry has to be closed on the way
@@ -2207,6 +2214,64 @@ class SubagentManager:
         from raven.acp_client import remote
 
         return machine, remote.session_root(getattr(row.config, "remote_cwd", None), handle)
+
+    async def _watch_stall(
+        self,
+        *,
+        task_id: str,
+        task_summary: str,
+        did: activity.RunActivity,
+        origin: dict[str, Any],
+    ) -> None:
+        """Tell the main agent when a dispatched run stops showing signs of life.
+
+        The same contract as the DAG runner's node notice: a notice, not a
+        timeout -- nothing here fails the run or moves its status. The spawn lane
+        had no watcher at all, so a run wedged on a call that never returned read
+        as running for as long as the process lived, and the board it feeds read
+        the same (2026-11-16: a spawn sat silent for 56 minutes with an open
+        socket and not one turn in its record).
+
+        One notice per silent stretch, re-armed only when the run moves again, so
+        a run that stays wedged is reported once rather than on every poll.
+        Cancelled by the dispatch that started it; every beat swallows its own
+        errors, because an audit of the run must never fail it.
+        """
+        announced_for: int | None = None
+        poll_s = max(0.01, min(30.0, STALL_NOTICE_S / 10))
+        while True:
+            await asyncio.sleep(poll_s)
+            try:
+                last = did.last_event_ms or did.started_at_ms
+                quiet_ms = int(time.time() * 1000) - last
+                if quiet_ms < STALL_NOTICE_S * 1000 or announced_for == last:
+                    continue
+                announced_for = last
+                minutes = max(1, int(quiet_ms / 60000))
+                agent = origin.get("agent") or GENERIC_AGENT
+                handle = origin.get("handle") or task_id
+                content = (
+                    f"[Stall notice] Subagent [{task_id}] ('{agent}', task '{task_summary}') has shown "
+                    f"no sign of life for {minutes} minutes -- no tool call, no step, no output. It has "
+                    "not failed and nothing is waiting for an answer; this is information, not a "
+                    "suspension. If other work is moving, waiting is fine. If it looks wedged, cancel "
+                    "the run and dispatch it again -- instance handles survive a cancel. No further "
+                    "notice comes unless it moves and stalls anew."
+                )
+                mark = {"kind": "stalled", "label": f"{agent}/{handle}", "status": "running"}
+                if not self._inject(content, origin, mark, dispatch_link=None):
+                    logger.debug("stall notice for [{}] not delivered: the scheduler is draining", task_id)
+                    continue
+                self._emit_delivered(origin, {**mark, "content": content})
+                logger.warning(
+                    "Subagent [{}] has shown no sign of life for {} minutes; the main agent was told",
+                    task_id,
+                    minutes,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a notice must never fail the run it reports on
+                logger.opt(exception=True).warning("stall watch for [{}] failed: {}", task_id, exc)
 
     async def _announce_result(
         self,

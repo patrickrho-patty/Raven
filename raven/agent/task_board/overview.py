@@ -21,6 +21,7 @@ answer, because what is running is not on disk.
 from __future__ import annotations
 
 import dataclasses
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,7 @@ from typing import Any
 
 from loguru import logger
 
+from raven.agent.subagent.activity import STALL_NOTICE_S
 from raven.agent.subagent.dag_store import REGISTRY_FILENAME
 from raven.agent.subagent.history import session_history_root
 from raven.agent.task_board.board import TaskGroup
@@ -149,15 +151,23 @@ def scan(sessions_dir: Path) -> list[Session]:
     return sessions
 
 
-def _runs(group: TaskGroup, rows: Rows, lineage: dict[str, str]) -> tuple[int, bool, int | None]:
-    """How many subagents worked on the group, whether one still runs, and since when (``None``: no clock).
+def _runs(group: TaskGroup, rows: Rows, lineage: dict[str, str]) -> tuple[int, bool, int | None, bool]:
+    """How many subagents worked on the group, whether one still runs, since when, and whether it went quiet.
 
     A spawn is one subagent; a DAG run is each node of it and of the runs that
     continued it; a run no row describes any more counts once. A run placed on
     several steps is still one run.
+
+    ``stalled`` is a running run whose own last sign of life is older than
+    ``STALL_NOTICE_S``. A live-looking row is not the same as a working one: the
+    process still holds the run, and its record sits at ``running`` while it
+    waits on a call that never returns (2026-11-16: 56 minutes of a card
+    counting up for a spawn that had said nothing). Only a row that carries the
+    stamp can answer this; one that does not is left out of the verdict rather
+    than guessed at.
     """
     links = {(t.kind, t.id) for s in group.steps for t in s.tasks}
-    count, running, starts = 0, False, []
+    count, running, starts, last_events = 0, False, [], []
     for kind, ident in links:
         ids = [ident] + ([run for run, placed in lineage.items() if placed == ident] if kind == "dag" else [])
         found = [rows[(kind, run)] for run in ids if (kind, run) in rows]
@@ -167,7 +177,10 @@ def _runs(group: TaskGroup, rows: Rows, lineage: dict[str, str]) -> tuple[int, b
                 running = True
                 if isinstance(row.get("started_at"), int):
                     starts.append(row["started_at"])
-    return count, running, (min(starts) if starts else None)
+                if isinstance(row.get("last_event_ms"), int):
+                    last_events.append(row["last_event_ms"])
+    stalled = bool(last_events) and int(time.time() * 1000) - max(last_events) >= STALL_NOTICE_S * 1000
+    return count, running, (min(starts) if starts else None), stalled
 
 
 def answer(sessions: list[Session], rows_of: RowsOf, *, include_completed: bool) -> dict[str, Any]:
@@ -184,7 +197,15 @@ def answer(sessions: list[Session], rows_of: RowsOf, *, include_completed: bool)
             except Exception:
                 logger.opt(exception=True).debug("Task board page: no run state for {}", session.session_dir)
         for group in session.groups:
-            sub_agents, running, since = _runs(group, rows, session.lineage)
+            sub_agents, running, since, stalled = _runs(group, rows, session.lineage)
+            # A run that has gone quiet is the owner's to look at, not something
+            # still working: the model's own "running" does not outrank a run
+            # that has published nothing for the notice window.
+            category = (
+                "needs_you"
+                if stalled and group.status not in ("needs_you", "completed")
+                else category_of(group.status, running)
+            )
             cards.append(
                 Card(
                     session_key=session.key,
@@ -195,7 +216,7 @@ def answer(sessions: list[Session], rows_of: RowsOf, *, include_completed: bool)
                     status=group.status,
                     created_at=group.created_at,
                     updated_at=group.updated_at,
-                    category=category_of(group.status, running),
+                    category=category,
                     running_since_ms=since,
                     events=len(group.steps),
                     sub_agents=sub_agents,

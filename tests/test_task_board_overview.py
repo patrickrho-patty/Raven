@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -45,9 +46,14 @@ def _session(
     return session_dir
 
 
-def _row(status: str, *, started: int | None = None, nodes: int = 1) -> dict:
+def _row(status: str, *, started: int | None = None, nodes: int = 1, last_event: int | None = None) -> dict:
     """A run as ``tasks.list`` answers it, reduced to what the reader reads."""
-    return {"status": status, "started_at": started, "nodes": [{} for _ in range(nodes)]}
+    return {
+        "status": status,
+        "started_at": started,
+        "last_event_ms": last_event,
+        "nodes": [{} for _ in range(nodes)],
+    }
 
 
 def _cards(root: Path, rows: dict | None = None, *, include_completed: bool = False) -> list[dict]:
@@ -95,6 +101,37 @@ def test_a_running_run_with_no_clock_still_runs(tmp_path):
     (card,) = _cards(tmp_path, {"web:a": {("dag", "R1"): _row("running")}})
 
     assert (card["category"], card["running_since_ms"]) == ("running", None)
+
+
+def test_a_run_that_went_quiet_moves_its_card_to_the_owner(tmp_path):
+    """A row can read running while the run publishes nothing at all: the process
+    still holds it, so the sidebar's liveness test passes, and the card counts up
+    for as long as the call hangs (2026-11-16: 56 minutes on a spawn that had
+    said nothing). Running needs a sign of life, not only a live handle."""
+    _session(tmp_path, "a", _group("g1", "running", ["spawn:n1"]))
+
+    quiet = _row("running", started=1000, last_event=int(time.time() * 1000) - 3_600_000)
+    (card,) = _cards(tmp_path, {"web:a": {("spawn", "n1"): quiet}})
+
+    assert card["category"] == "needs_you"
+
+
+def test_a_run_that_moved_recently_still_reads_running(tmp_path):
+    _session(tmp_path, "a", _group("g1", "running", ["spawn:n1"]))
+
+    fresh = _row("running", started=1000, last_event=int(time.time() * 1000) - 1000)
+    (card,) = _cards(tmp_path, {"web:a": {("spawn", "n1"): fresh}})
+
+    assert card["category"] == "running"
+
+
+def test_a_completed_group_stays_completed_even_with_a_quiet_run(tmp_path):
+    _session(tmp_path, "a", _group("g1", "completed", ["spawn:n1"]))
+
+    quiet = _row("running", started=1000, last_event=int(time.time() * 1000) - 3_600_000)
+    (card,) = _cards(tmp_path, {"web:a": {("spawn", "n1"): quiet}}, include_completed=True)
+
+    assert card["category"] == "completed"
 
 
 def test_a_dag_run_runs_while_it_or_a_run_that_continued_it_runs(tmp_path):
