@@ -1920,6 +1920,30 @@ class TestTheSessionSurvivesARestart:
         assert path.stat().st_mode & 0o777 == 0o600
         assert json.loads(path.read_text(encoding="utf-8"))["cookie"] == "cookie-1"
 
+    def test_the_cookie_survives_a_graceful_stop(self, home: Path) -> None:
+        """The state file is deleted on every graceful exit, so a cookie kept
+        only there is destroyed at the moment the next process needs it -- and
+        every restart signed every open tab out (2026-11-16)."""
+        serve_commands._write_serve_state(18792, "tok-1", "cookie-1")
+        (home / "serve.json").unlink()
+
+        gw = self._Gateway("freshly-minted")
+        serve_commands.adopt_stored_cookie(gw)
+
+        assert gw.session_cookie == "cookie-1"
+
+    def test_a_record_from_an_older_install_is_still_adopted(self, home: Path) -> None:
+        """An install that predates the cookie file leaves the value in
+        serve.json alone; the next write mirrors it across."""
+        (home / "serve.json").write_text(
+            json.dumps({"port": 18792, "token": "tok-1", "cookie": "legacy"}), encoding="utf-8"
+        )
+
+        gw = self._Gateway("freshly-minted")
+        serve_commands.adopt_stored_cookie(gw)
+
+        assert gw.session_cookie == "legacy"
+
 
 class TestAFirstRunIsGivenTimeToCompile:
     """A fresh install byte-compiles its whole dependency set before the gateway

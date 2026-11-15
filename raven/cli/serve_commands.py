@@ -165,6 +165,20 @@ def _state_path() -> Path:
     return raven_home() / "serve.json"
 
 
+def _cookie_path() -> Path:
+    """Where the session cookie outlives the process that minted it.
+
+    Separate from ``serve.json`` on purpose. That file is a record of a
+    *running* process -- its pid, port and boot id -- and every graceful exit
+    deletes it, so a copy kept only there is destroyed at the exact moment the
+    next process needs it. A restart then minted a fresh cookie and signed out
+    every open tab, which is what the adoption in :func:`adopt_stored_cookie`
+    was written to prevent: the supervision did its job and the user paid for
+    it with a sign-in (2026-11-16, reported twice in one evening).
+    """
+    return _state_path().with_name("serve-cookie")
+
+
 def _stored_cookie() -> Optional[str]:
     """The session cookie the last gateway used, if one was recorded.
 
@@ -172,9 +186,19 @@ def _stored_cookie() -> Optional[str]:
     exists to restart the gateway, and a fresh cookie on each start meant that
     doing its job logged the user out -- residency the user could not see,
     because their tab showed "not authenticated" either way.
+
+    The dedicated file first, then ``serve.json`` for an install that predates
+    it: a state file left by a crash still carries the value, and the next
+    write mirrors it across.
     """
     import json
 
+    try:
+        cookie = _cookie_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        cookie = ""
+    if cookie:
+        return cookie
     try:
         data = json.loads(_state_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -235,6 +259,10 @@ def _write_serve_state(port: int, token: str, cookie: str = "", boot_id: str = "
         if boot_id:
             state["boot_id"] = boot_id
         atomic_replace(path, json.dumps(state), mode=0o600)
+        if cookie:
+            # Mirrored where a graceful exit does not delete it: the next start
+            # adopts this value instead of minting one and signing out every tab.
+            atomic_replace(_cookie_path(), cookie, mode=0o600)
         return path
     except OSError:
         return None
