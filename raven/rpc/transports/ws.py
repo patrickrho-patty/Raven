@@ -181,6 +181,10 @@ class WsGateway:
         # ``gateway.page.allowedOrigins``: the names the page answers besides
         # loopback. Empty -- the default -- keeps the loopback-only policy.
         self.allowed_origins: tuple[str, ...] = ()
+        # ``gateway.page.requireAuth``: the sign-in cookie. On, the page asks
+        # for a one-time link and keeps a session for thirty days; off, anything
+        # that passes the origin check is served.
+        self.auth_required: bool = True
 
     def mint_nonce(self) -> str:
         """Issue a one-time sign-in nonce, valid for :data:`_NONCE_TTL_S`.
@@ -243,7 +247,14 @@ class WsGateway:
         compare_digest on both: the timing difference is not practically
         reachable here, but a credential check that short-circuits on the
         first wrong byte is not worth keeping when the fix is free.
+
+        ``gateway.page.requireAuth = false`` opens the surface to anyone who
+        can reach the port. Only the origin check stands between a page and the
+        agent then, so it is a setting for a private network (a tailnet, a
+        loopback forward) and not for an address the internet can route to.
         """
+        if not self.auth_required:
+            return True
         cookie = request.cookies.get(self._cookie_name(request))
         if cookie is not None and secrets.compare_digest(cookie, self.session_cookie):
             return True

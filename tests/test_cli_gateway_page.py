@@ -439,3 +439,30 @@ def test_the_page_config_takes_its_camel_case_keys() -> None:
 
     pasted = GatewayPageConfig(allowedOrigins=["http://box.tailnet.ts.net:18792/", " box.ts.net. "])
     assert pasted.allowed_origins == ["box.tailnet.ts.net", "box.ts.net"]
+
+
+async def test_a_page_can_be_served_without_a_sign_in_link(home: Path) -> None:
+    """`gateway.page.requireAuth = false`: the socket opens with no cookie and
+    no nonce. The origin check is not part of that switch -- a page elsewhere
+    still cannot reach the gateway by borrowing the name."""
+    import aiohttp
+
+    from raven.cli._gateway_page import mount_page
+    from raven.config.schema import GatewayPageConfig
+
+    name = "box.tailnet.ts.net"
+    page = GatewayPageConfig(host="127.0.0.1", allowed_origins=[name], require_auth=False)
+    mount = await mount_page(_FakeLoop(_FakeCron()), 18981, page_config=page)
+    assert mount is not None
+    try:
+        named = {"Host": f"{name}:{mount.port}", "Origin": f"http://{name}:{mount.port}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(f"{mount.url}/rpc", headers=named) as ws:
+                assert not ws.closed
+            with pytest.raises(aiohttp.WSServerHandshakeError):
+                async with session.ws_connect(
+                    f"{mount.url}/rpc", headers={**named, "Origin": "http://evil.example"}
+                ):
+                    pass
+    finally:
+        await mount.teardown()

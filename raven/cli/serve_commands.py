@@ -474,6 +474,7 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     adopt_stored_cookie(gateway)
     # The names this page answers besides loopback (``gateway.page``).
     gateway.allowed_origins = tuple(page_config.allowed_origins)
+    gateway.auth_required = bool(page_config.require_auth)
     # A relaunch after `system.upgrade` must reclaim the exact port the open
     # browser is pointed at, so it asks for strict mode rather than letting the
     # probe wander to the next free port.
@@ -538,7 +539,7 @@ async def _serve_main(port: int, open_browser: bool) -> None:
     if stack.build_error is not None:
         typer.echo(f"warning: agent loop failed to build ({stack.build_error.message}); chat turns will error")
     if open_browser:
-        auth_url = f"{base_url}/auth#{gateway.mint_nonce()}"
+        auth_url = f"{base_url}/auth#{gateway.mint_nonce()}" if gateway.auth_required else base_url
         typer.echo(f"opening browser: {base_url}")
         _open(auth_url)
 
@@ -755,6 +756,8 @@ async def _attach(port: int, token: str, boot_id: str = "", *, _retry: bool = Tr
                     return None
                 if boot_id and answered.get("boot_id") != boot_id:
                     return None
+            if not _page_auth_required():
+                return base
             async with session.post(f"{base}/auth/nonce", headers={"X-Raven-Token": token}) as minted:
                 if minted.status != 200:
                     fresh = _read_serve_state()
@@ -1726,16 +1729,40 @@ def _run_foreground(port: int) -> None:
         raise typer.Exit(proc.returncode)
 
 
+def _page_auth_required() -> bool:
+    """Whether this install's page asks for a sign-in link.
+
+    Read here for the launcher's own copy: ``raven web`` phrases what it prints
+    and mints the nonce, so it has to know before it can do either. A config
+    that will not load answers "required", which is the safe direction -- the
+    link it mints is useless only if the page did not want one.
+    """
+    try:
+        from raven.config import load_config
+
+        return bool(load_config().gateway.page.require_auth)
+    except Exception:  # noqa: BLE001 - a launcher must not fail on a settings read
+        return True
+
+
 def _open(url: str) -> None:
-    """Print the sign-in link, then hand it to a browser.
+    """Print the page's URL, then hand it to a browser.
 
     Printed every time, because ``webbrowser.open`` answers True whenever it ran
     something: VS Code's ``browser.sh`` exits 0 whatever happened, and a machine
     with no display hands the URL to a console browser that has no JavaScript
     and so never redeems it. Printed first, because a console browser holds the
     terminal until it is quit.
+
+    The sign-in wording belongs only to a URL that carries a nonce. With
+    ``gateway.page.requireAuth`` off there is nothing to redeem, and telling
+    someone to use a one-time link they will never see again is the kind of copy
+    this feature exists to remove.
     """
-    typer.echo(f"sign in with this link (it works once): {url}")
+    if "/auth#" in url:
+        typer.echo(f"sign in with this link (it works once): {url}")
+    else:
+        typer.echo(f"opening {url}")
     if not webbrowser.open(url):
         typer.echo("could not open a browser automatically; open the link above")
 

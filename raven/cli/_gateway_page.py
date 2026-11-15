@@ -170,6 +170,7 @@ async def mount_page(
     # The names this page answers besides loopback. A browser that reaches it
     # by name has no loopback Origin to offer, and this is what admits it.
     ws_gateway.allowed_origins = tuple(page_config.allowed_origins)
+    ws_gateway.auth_required = bool(page_config.require_auth)
     # Same port policy as standalone serve, strict flag included: a relaunch
     # under an open tab (the web supervisor's retry, `system.upgrade`) has to
     # come back on the port that tab is pointed at, and this mount is now what

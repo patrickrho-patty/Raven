@@ -831,6 +831,16 @@ class GatewayPageConfig(Base):
     is accepted and reduced to its hostname, which is the only part the
     comparison reads.
     """
+    require_auth: bool = True
+    """Whether the page asks for a sign-in link before it answers.
+
+    On by default: a one-time link sets a session cookie that lasts thirty days,
+    and every credential switch keeps an open tab signed in. Off, the page is
+    served to whoever the origin check admits -- any browser that reaches the
+    address by name, and no link. Only the origin check is left between such a
+    page and the agent, so this belongs to an address only a private network can
+    reach: a tailnet, a loopback port forward. Never a public interface.
+    """
 
     @field_validator("allowed_origins")
     @classmethod
