@@ -43,17 +43,15 @@ Skill Hub 候选。可用性取决于配置和服务连通性；目录搜索命�
 重新打开时回到同一个目录。旧配置里显式的 `null` endpoint 表示保持关闭。两个方向都在下一次
 搜索时生效，不需要重新加载。
 
-`skillForge.discovery` 默认 `pull`：在符合条件的轮次中提供简短的名称/描述菜单，
-模型用 `find_skill` 搜索、用 `read_skill` 读取正文。`push` 则运行选择/注入管线，
-把选中正文放入上下文。Pull 避免 push 路径逐轮的重写与门控模型调用，但不意味着所有
-检索都无成本，也不意味着每轮获得相同菜单。
+检索到的技能以简短的名称/描述菜单出现在符合条件的轮次中，模型用 `find_skill` 搜索、
+用 `read_skill` 读取正文。只有标记为 `always` 的技能常驻系统提示词。挑选技能不会让一轮
+多出模型调用，不过查找时仍可能访问 Skill Hub，也不是每轮都会出现菜单。
 
 Bundle 下载有独立的同意设置：
 
 ```json
 {
   "skillForge": {
-    "discovery": "pull",
     "autoInstall": "prompt"
   }
 }
@@ -80,7 +78,7 @@ EverOS 是默认记忆后端插件，与 Raven core 独立发行，通过 Memory
 3. 经验提炼由选用的记忆后端提供，通过该后端的插件设置配置。
    宿主不使用 `skillForge.extraction` 启动本地提炼管线。
 
-SkillForge 负责技能检索、注入和下载包管理。宿主未实现反馈驱动的技能版本管理与退役。
+SkillForge 负责技能检索、提供和下载包管理。宿主未实现反馈驱动的技能版本管理与退役。
 可通过记忆后端存储的 case、skill 和健康状态检查保留了哪些经验。Harness
 自进化由独立 Evolver 工具执行，并经过基准评估，先读
 [Evolver：使用与实验](evolver.md)，实现细节见[设计与实现](self-evolution-map.md)。
@@ -148,7 +146,7 @@ slow path 可消耗有限模型调用生成计划，无有效计划时使用确�
 | Skill 已列出但未使用 | 正文是否读取、所需工具、blocklist 和当前 Agent |
 | 任务完成后没有新技能 | 后端实际提炼支持；`skillForge.extraction` 本身不启动宿主管线 |
 | 长任务丢失细节 | 归档与当前窗口的区别、compaction、可重新读取的来源 |
-| 模型成本增加 | 后端提炼、embedding、Curator slow path，以及启用时的技能 rewrite/gating |
+| 模型成本增加 | 后端提炼、embedding 和 Curator slow path |
 
 记忆视图可能暴露私有会话和推断偏好。应另行检查后端的删除与保留控制；
 删除宿主 session 或屏蔽 skill 不证明所有后端记录也已删除。
@@ -159,9 +157,10 @@ slow path 可消耗有限模型调用生成计划，无有效计划时使用确�
 最后才允许修改。`raven plugin auth <server>` 处理已配置 MCP 的 OAuth，不是任意
 插件安装器。
 
-网页端设置弹窗的「插件」页负责开关、重试和授权已配置的服务；页上的「新增」会把你带到
+网页端设置弹窗的「MCP」页负责开关、重试和授权已配置的服务；页上的「新增」会把你带到
 会话里，由 Raven 从 PlugHub 目录接入服务；目录里没有的服务，要手改 `config.json` 的
-`tools.mcpServers`。
+`tools.mcpServers`。旁边的「插件」页列出 [Agent 插件包](agent-plugin-packages.md)，
+它们会带来自己的技能和 MCP 服务。
 
 需要进程内工具、hook、服务或记忆后端时使用 Raven plugin。声明式
 `raven-plugin.toml` 列出贡献，代码运行于宿主信任域内。`raven plugins` 列出已安装
