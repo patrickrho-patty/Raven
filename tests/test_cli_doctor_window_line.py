@@ -38,3 +38,14 @@ def test_an_unknown_model_shows_the_default_it_fell_back_to(monkeypatch):
     line = _describe_window(SimpleNamespace(context_window_tokens=None, model="nobody/unmapped-model"))
     assert line.startswith(f"auto -> {rates.DEFAULT_CONTEXT_WINDOW_TOKENS:,} default")
     assert "no catalogue knows this model" in line
+
+
+def test_a_window_stated_for_the_model_is_shown_before_the_pin():
+    """One number cannot answer for several models, so a model's own stated
+    window outranks agents.defaults.contextWindowTokens -- and the line has to
+    say which of the two it used.
+    """
+    line = _describe_window(
+        SimpleNamespace(stated_window=1_000_000, context_window_tokens=200_000, model="custom/cc/claude-opus-5-5")
+    )
+    assert line == "1,000,000 (stated for this model)"

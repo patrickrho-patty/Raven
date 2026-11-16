@@ -59,6 +59,9 @@ class RoutingInfo:
     provider: Optional[str]
     max_tokens: int
     context_window_tokens: Optional[int]
+    #: A window stated for this one model in ``modelOverlay``. Outranks the
+    #: deployment-wide pin, as the binding resolves it.
+    stated_window: Optional[int] = None
 
 
 @dataclass
@@ -309,29 +312,39 @@ def _inspect_config_health(config: Any, *, fix: bool) -> ConfigHealth:
     guess under a more confident name.
     """
     from raven.config.loader import get_config_path, read_raw_or_raise
+    from raven.providers.protocol import stated_context_window
     from raven.providers.rates import DEFAULT_CONTEXT_WINDOW_TOKENS, resolve_context_window
 
     health = ConfigHealth()
     defaults = config.agents.defaults
-    pinned = defaults.context_window_tokens
     model = defaults.model
+    # A window stated for this one model outranks the deployment-wide pin, the
+    # same order the binding resolves: a machine running several models cannot
+    # state them all in one number.
+    stated = stated_context_window(config.get_provider(model), model) if model else None
+    pinned = stated or defaults.context_window_tokens
 
     if pinned and model:
         real = resolve_context_window(model)
         if real and pinned < real:
             health.findings.append(
-                f"contextWindowTokens is pinned to {pinned:,}, but {model} holds {real:,}. "
+                f"the context window is pinned to {pinned:,}, but {model} holds {real:,}. "
                 f"Everything is sized against the pin: the history budget, when the Curator "
                 f"starts paying for a slow path, and when memory consolidation archives."
             )
-            health.fixes.append("remove agents.defaults.contextWindowTokens so the window follows each model")
-    elif model and resolve_context_window(model) is None:
+            health.fixes.append(
+                "remove agents.defaults.contextWindowTokens so the window follows each model"
+                if stated is None
+                else f"correct providers.{config.get_provider_name(model) or '<vendor>'}.modelOverlay's window for this model"
+            )
+    elif model and stated is None and resolve_context_window(model) is None:
         # The other failure of the same knob: unpinned and unknown, so every
         # budget is sized against a default that fits no model in particular.
         health.findings.append(
             f"No catalogue knows the context window of {model}, so history is sized against the "
             f"{DEFAULT_CONTEXT_WINDOW_TOKENS:,}-token default -- a fifth of a 1M-token model. "
-            f"Pin the real window with agents.defaults.contextWindowTokens."
+            f"Pin the real window in modelOverlay for that model, or for every model with "
+            f"agents.defaults.contextWindowTokens."
         )
 
     provider = (getattr(defaults, "provider", "") or "").strip()
@@ -628,6 +641,8 @@ def _gather_static_checks() -> DoctorReport:
     from raven.providers.rates import resolve_max_output_tokens
 
     defaults = config.agents.defaults
+    from raven.providers.protocol import stated_context_window
+
     report.routing = RoutingInfo(
         model=defaults.model,
         provider=config.get_provider_name(),
@@ -636,6 +651,7 @@ def _gather_static_checks() -> DoctorReport:
         # no longer exists would be reporting a setting, not the behaviour.
         max_tokens=resolve_max_output_tokens(defaults.model),
         context_window_tokens=defaults.context_window_tokens,
+        stated_window=stated_context_window(config.get_provider(defaults.model), defaults.model),
     )
 
     enabled = sorted(config.channels.enabled_channel_names())
@@ -844,6 +860,8 @@ def _describe_window(routing) -> str:
     """
     from raven.providers.rates import DEFAULT_CONTEXT_WINDOW_TOKENS, resolve_context_window
 
+    if getattr(routing, "stated_window", None):
+        return f"{routing.stated_window:,} (stated for this model)"
     if routing.context_window_tokens:
         return f"{routing.context_window_tokens:,} (pinned)"
     real = resolve_context_window(routing.model) if routing.model else None

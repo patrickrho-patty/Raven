@@ -552,3 +552,28 @@ def test_a_pin_is_resolved_once_for_the_turn_that_holds_it() -> None:
 
     assert resolve_pin().model == "second"
     assert pool.asked == [("first", None), ("second", None)]
+
+
+def test_a_window_stated_for_one_model_beats_the_deployment_pin() -> None:
+    """One number cannot answer for several models a session runs, and a
+    catalogue can answer for the wrong model when a gateway prefixes the id.
+    The binding therefore prefers the model's own stated window.
+    """
+    from raven.config.schema import ModelOverlay
+
+    cfg = _config("custom/cc/claude-opus-5-5", custom="sk-test")
+    cfg.agents.defaults.context_window_tokens = 200_000
+    section = cfg.providers.get("custom")
+    assert section is not None
+    section.model_overlay = {"claude-opus-5-5": ModelOverlay(context_window_tokens=1_000_000)}
+    from raven.providers.pool import ProviderPool
+
+    assert ProviderPool(cfg).bind("custom/cc/claude-opus-5-5").context_window == 1_000_000
+
+
+def test_a_model_with_no_stated_window_keeps_the_deployment_pin() -> None:
+    cfg = _config("custom/cc/claude-opus-5-5", custom="sk-test")
+    cfg.agents.defaults.context_window_tokens = 200_000
+    from raven.providers.pool import ProviderPool
+
+    assert ProviderPool(cfg).bind("custom/cc/claude-opus-5-5").context_window == 200_000

@@ -36,13 +36,18 @@ def _same_model(left: str, right: str) -> bool:
     return left.lower() == right.lower() or _model_id(left) == _model_id(right)
 
 
+def _read(section: Any, name: str, default: Any = None) -> Any:
+    """One field of a provider section, whichever shape it arrived in."""
+    if isinstance(section, dict):
+        return section.get(name, default)
+    return getattr(section, name, default)
+
+
 def configured_protocol(section: Any, model: str | None) -> ApiProtocol | None:
     """Return the explicit protocol for this model, if configured."""
 
     def read(name: str, default: Any = None) -> Any:
-        if isinstance(section, dict):
-            return section.get(name, default)
-        return getattr(section, name, default)
+        return _read(section, name, default)
 
     overrides = read("model_protocols", {}) or {}
     if isinstance(overrides, dict) and model:
@@ -56,6 +61,38 @@ def configured_protocol(section: Any, model: str | None) -> ApiProtocol | None:
     if configured in ALL_PROTOCOLS:
         return cast(ApiProtocol, configured)
 
+    return None
+
+
+def stated_context_window(section: Any, model: str | None) -> int | None:
+    """The context window a person stated for this model, if any.
+
+    ``modelOverlay`` is where a model no catalogue carries gets its facts
+    written down, and the window is one of them: a gateway's id often names a
+    model every catalogue already knows under another vendor's spelling, and the
+    lookup then answers for a different model. Read here rather than in the
+    catalogue ladder so one explicit number outranks every guess, including
+    ``agents.defaults.contextWindowTokens``, which cannot answer for a session
+    that runs several models.
+
+    A model id is matched the way ``model_protocols`` matches one: whole, or by
+    its last segment, so an overlay keyed ``claude-opus-5-5`` answers for
+    ``custom/cc/claude-opus-5-5`` as well. Unset, non-integer and non-positive
+    values say nothing rather than pinning a zero-token window.
+    """
+    overlays = _read(section, "model_overlay", {}) or {}
+    if not isinstance(overlays, dict) or not model:
+        return None
+    for candidate, overlay in overlays.items():
+        if not _same_model(str(candidate), model):
+            continue
+        value = (
+            overlay.get("context_window_tokens", overlay.get("contextWindowTokens"))
+            if isinstance(overlay, dict)
+            else getattr(overlay, "context_window_tokens", None)
+        )
+        if isinstance(value, int) and value > 0:
+            return value
     return None
 
 

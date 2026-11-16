@@ -1450,3 +1450,31 @@ async def test_a_reported_reasoning_count_reaches_the_usage_record(monkeypatch, 
     assert semconv.llm_output_payload(response)["usage"]["reasoning_tokens"] == 235
     assert semconv.llm_attrs(response, "custom", "test")["llm.usage.reasoning_tokens"] == 235
     assert TurnPathMixin._build_usage_snapshot(response, "test", "sess").reasoning_tokens == 235
+
+
+def test_a_stated_window_answers_for_every_spelling_of_the_id() -> None:
+    """`cc/claude-opus-5-5` is the same model as `claude-opus-5-5`, and every
+    catalogue saves its answer under the bare name. The overlay is matched the
+    way `modelProtocols` matches one, so stating it once covers the gateway id.
+    """
+    from raven.providers.protocol import stated_context_window
+
+    config = Config.model_validate(
+        {"providers": {"custom": {"modelOverlay": {"claude-opus-5-5": {"contextWindowTokens": 1_000_000}}}}}
+    )
+
+    assert stated_context_window(config.providers.custom, "custom/cc/claude-opus-5-5") == 1_000_000
+    assert config.providers.custom.model_overlay["claude-opus-5-5"].context_window_tokens == 1_000_000
+
+
+def test_a_stated_window_that_states_nothing_is_not_a_pin() -> None:
+    """Zero and a non-number read as "nothing stated", not as a zero-token
+    window: a pin of zero would size every request against nothing.
+    """
+    from raven.providers.protocol import stated_context_window
+
+    section = {"model_overlay": {"cc/m": {"contextWindowTokens": 0}, "other/m": {"contextWindowTokens": "lots"}}}
+
+    assert stated_context_window(section, "cc/m") is None
+    assert stated_context_window(section, "other/m") is None
+    assert stated_context_window(section, "unlisted/m") is None

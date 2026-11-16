@@ -350,12 +350,17 @@ class ModelOverlay(Base):
     showing the id. That is usually fine -- the id is the name the user gave
     their own deployment -- but it leaves no way to label several of them.
 
-    Only what a person states about presentation. Token accounting is not in
-    scope here -- `agents.defaults.contextWindowTokens` holds what a person can
-    state about it, and the output ceiling resolves per model with no knob at
-    all. What has no knob either is a *price* for an endpoint no catalogue
-    prices; such a deployment reports unknown spend rather than borrowing a
-    hosted model's rate. Adding one is a separate ask.
+    Only what a person states about presentation, plus the one number a
+    catalogue can get wrong. The context window is here because a gateway's
+    model is often a name a catalogue already carries for something else: an id
+    like ``cc/claude-opus-5-5`` is looked up as the older Opus and sized at a
+    fifth of its real window, and one global pin cannot answer for several
+    models a session may run. Everything else stays as it was --
+    ``agents.defaults.contextWindowTokens`` still holds the single number a
+    deployment wants for whatever it runs, and the output ceiling resolves per
+    model with no knob at all. What has no knob either is a *price* for an
+    endpoint no catalogue prices; such a deployment reports unknown spend rather
+    than borrowing a hosted model's rate. Adding one is a separate ask.
 
     The tags are the same closed vocabulary the registry publishes
     (`providers/registry_data.py`), and they are read for display only -- the
@@ -379,6 +384,15 @@ class ModelOverlay(Base):
     input_modalities: list[str] = Field(default_factory=list)
     output_modalities: list[str] = Field(default_factory=list)
     reasoning_efforts: list[str] = Field(default_factory=list)
+    context_window_tokens: int | None = None
+    """The context window this model really has, in tokens.
+
+    A number stated here outranks every catalogue lookup for this model and
+    ``agents.defaults.contextWindowTokens``, which is one number for every model
+    a session might run. Unset, or not positive, leaves the ladder the
+    catalogues answer. History trimming is sized by this, so a wrong value costs
+    either a truncated past or a request the provider refuses.
+    """
 
 
 class ProviderEndpoint(Base):

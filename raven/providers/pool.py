@@ -145,8 +145,12 @@ class ProviderPool:
         cfg.agents.defaults.provider = resolved
         # The pin travels with the binding rather than being read where the
         # window is used: a session on another model still owes the user the
-        # number they pinned.
-        binding = ModelBinding(make_provider(cfg), model, cfg.agents.defaults.context_window_tokens)
+        # number they pinned. A window stated for this one model beats the
+        # deployment-wide pin, which is the point of stating one here.
+        from raven.providers.protocol import stated_context_window
+
+        stated = stated_context_window(cfg.providers.get(resolved), model)
+        binding = ModelBinding(make_provider(cfg), model, stated or cfg.agents.defaults.context_window_tokens)
         cache[key] = binding
         return binding
 
