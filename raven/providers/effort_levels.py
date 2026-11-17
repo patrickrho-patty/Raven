@@ -108,7 +108,14 @@ def levels_for(
         row = _merged(route, authority)
     else:
         row = authority
-    if row is None or row.get("supports_reasoning") is not True:
+    if row is None:
+        # A missing row is not a model answer. The table not listing an id is the
+        # normal case for a reseller gateway serving ids of its own, and ``()``
+        # would read as "this model has no reasoning" -- which hides the effort
+        # control altogether and leaves the reader with nothing to set. ``None``
+        # means unknown, and every caller then falls open to the standard ladder.
+        return None
+    if row.get("supports_reasoning") is not True:
         return ()
     serving = _serving_provider(provider)
     if serving:
@@ -215,6 +222,13 @@ def _candidates(model: str) -> Iterator[tuple[str, bool]]:
     raw_head = (model or "").partition("/")[0]
     if provider and rest and raw_head and raw_head != provider:
         out.append((f"{provider}/{rest}", False))
+    if provider and rest:
+        # The bare id as the last resort, provider-checked. LiteLLM keys a model
+        # by its own name as often as by ``provider/model``, and without this the
+        # row that says "this model has no reasoning" was never reached -- so an
+        # explicit no and an unknown id both came back the same way, and nothing
+        # downstream could tell the reader which one it was looking at.
+        out.append((rest, True))
     from raven.providers.wire import metadata_candidates
 
     for candidate in metadata_candidates(model):

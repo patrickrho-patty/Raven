@@ -24,9 +24,14 @@ def test_a_bare_model_key_is_found_through_its_provider(table):
     assert effort_levels.levels_for("openai/gpt-5") == ("minimal", "low", "medium", "high")
 
 
-def test_a_model_absent_from_the_table_has_no_levels(table):
+def test_a_model_absent_from_the_table_is_unknown_not_no_reasoning(table):
+    """Absence is not a model answer. ``()`` says "this model has no reasoning",
+    which hides the effort control; ``None`` says "unknown", and the caller falls
+    open to the standard ladder. A reseller gateway serving ids of its own is the
+    case that needs the difference: every id it serves would otherwise report no
+    reasoning at all."""
     table({"gpt-5": _row()})
-    assert effort_levels.levels_for("anthropic/claude-opus-4-5") == ()
+    assert effort_levels.levels_for("anthropic/claude-opus-4-5") is None
 
 
 def test_the_table_being_unreadable_is_not_a_model_answer(table):
@@ -177,7 +182,7 @@ def test_the_vendors_ladder_answers_a_row_that_states_no_levels(table):
 
 def test_the_vendors_ladder_does_not_invent_reasoning_for_a_model_the_table_lacks(table):
     table({"openai/gpt-5": _row()})
-    assert effort_levels.levels_for("deepseek/deepseek-v4-flash") == ()
+    assert effort_levels.levels_for("deepseek/deepseek-v4-flash") is None
 
 
 def test_a_rows_own_level_flag_beats_the_vendors_ladder(table):
@@ -333,7 +338,7 @@ def test_a_route_that_says_false_is_vetoed_even_when_the_vendor_says_true(table)
 
 def test_a_bare_row_from_an_unrelated_vendor_is_not_borrowed(table):
     table({"some-model": {**_row(), "litellm_provider": "somevendor"}})
-    assert effort_levels.levels_for("bedrock/some-model") == ()
+    assert effort_levels.levels_for("bedrock/some-model") is None
 
 
 def test_an_unknown_provider_spelling_still_finds_its_row(table):
@@ -362,7 +367,7 @@ def test_a_prefixed_model_never_reaches_litellms_provider_resolver(table, monkey
     monkeypatch.setattr(litellm_utils, "_get_potential_model_names", record)
     assert effort_levels.levels_for("github_copilot/gpt-4o") == ("minimal", "low", "medium", "high")
     assert calls == []
-    assert effort_levels.levels_for("github_copilot/not-in-the-table") == ()
+    assert effort_levels.levels_for("github_copilot/not-in-the-table") is None
     assert calls == []
 
 
@@ -378,7 +383,7 @@ def test_a_bare_model_still_consults_litellms_resolver(table, monkeypatch):
         return {}
 
     monkeypatch.setattr(litellm_utils, "_get_potential_model_names", record)
-    assert effort_levels.levels_for("some-bare-model") == ()
+    assert effort_levels.levels_for("some-bare-model") is None
     assert calls == ["some-bare-model"]
 
 
