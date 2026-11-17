@@ -167,6 +167,48 @@ async def test_flow_redirect_then_callback_resolution(monkeypatch):
     assert ("oauth.done", {"server": "srv", "ok": True}) in events
 
 
+async def test_the_callback_carries_the_rfc9207_issuer_through():
+    """An advertised ``iss`` must reach the SDK, and absence must stay ``None``.
+
+    Linear advertises ``authorization_response_iss_parameter_supported``, and the
+    SDK rejects a response that omits ``iss`` once it does. The redirect's query
+    is the only place the value exists, so losing it on the way to
+    ``AuthorizationCodeResult`` fails a flow the user already consented to, after
+    the success page, with no token request ever made.
+    """
+    from mcp.client.auth.utils import validate_authorization_response_iss
+    from mcp.shared.auth import OAuthMetadata
+
+    metadata = OAuthMetadata.model_validate(
+        {
+            "issuer": "https://mcp.linear.app",
+            "authorization_endpoint": "https://mcp.linear.app/authorize",
+            "token_endpoint": "https://mcp.linear.app/token",
+            "authorization_response_iss_parameter_supported": True,
+        }
+    )
+
+    flow = _Flow("linear", None)
+    await flow.redirect("https://mcp.linear.app/authorize?client_id=cid&state=iss-1&code_challenge=x")
+    task = asyncio.create_task(flow.callback())
+    await asyncio.sleep(0)
+    assert resolve_callback({"state": "iss-1", "code": "c", "iss": "https://mcp.linear.app"})[0]
+
+    result = await task
+    assert result.iss == "https://mcp.linear.app"
+    # The validator that raised on the real Linear connect, run for real.
+    validate_authorization_response_iss(result.iss, metadata)
+
+    # A server that sends no ``iss`` must arrive as None: an empty string reads
+    # as present and turns into an issuer mismatch against every server.
+    plain = _Flow("plain", None)
+    await plain.redirect("https://as.example/authorize?client_id=cid&state=iss-2&code_challenge=x")
+    task = asyncio.create_task(plain.callback())
+    await asyncio.sleep(0)
+    assert resolve_callback({"state": "iss-2", "code": "c"})[0]
+    assert (await task).iss is None
+
+
 async def test_the_callback_endpoint_is_stable_across_gateway_ports(monkeypatch):
     """The redirect URI must not follow the gateway's port.
 

@@ -216,7 +216,11 @@ def resolve_callback(query: dict[str, Any]) -> tuple[bool, str]:
     if not code:
         fut.set_exception(OAuthWaitTimeoutError("authorization response carried no code"))
         return True, _page(False, "The authorization response was malformed. You can close this page.")
-    fut.set_result((code, state))
+    # RFC 9207 `iss` must survive: the SDK rejects the whole flow when the server
+    # advertises iss support and the value never arrives. Absent stays None -- an
+    # empty string reads as present and fails the issuer comparison instead.
+    iss = query.get("iss")
+    fut.set_result((code, state, str(iss) if iss else None))
     return True, _page(True, f"Raven is now connected to {server}. You can close this page.")
 
 
@@ -663,7 +667,7 @@ class _Flow:
             raise OAuthWaitTimeoutError(f"'{self._server}' needs authorization, and this connect cannot wait for it")
         fut = _PENDING[state].future
         try:
-            code, got_state = await asyncio.wait_for(fut, timeout=OAUTH_FLOW_TIMEOUT)
+            code, got_state, iss = await asyncio.wait_for(fut, timeout=OAUTH_FLOW_TIMEOUT)
         except asyncio.TimeoutError as e:
             _PENDING.pop(state, None)
             self._emit("oauth.done", {"server": self._server, "ok": False, "error": "timeout"})
@@ -676,7 +680,7 @@ class _Flow:
         self._emit("oauth.done", {"server": self._server, "ok": True})
         from mcp.shared.auth import AuthorizationCodeResult
 
-        return AuthorizationCodeResult(code=code, state=got_state)
+        return AuthorizationCodeResult(code=code, state=got_state, iss=iss)
 
 
 def cancel_pending(server: str, *, reason: str = "superseded by a newer authorization attempt") -> None:
