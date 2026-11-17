@@ -1197,3 +1197,60 @@ class TestDelegationNeedsSomewhereToDelegateTo:
         text = (await builder.build(_ctx(tmp_path))).text
         assert "`Scribe` owns decks." in text
         assert "run_subagent_dag" not in text
+
+
+class TestTheAskGuidelineFollowsTheToolSurface:
+    """The identity block names ``ask_user``; this turn may not hold it.
+
+    ``tools.disabled_tools`` can take the tool away, and the prompt used to go on
+    telling the model to call it and wait. What the model did with an instruction
+    it could not obey was ask in prose: the question, with no way to file it and
+    no way to wait. The rule is written from the flag now.
+    """
+
+    @staticmethod
+    def _defs(*names: str) -> list[dict]:
+        return [{"function": {"name": n}} for n in names]
+
+    def test_a_bound_tool_keeps_the_instruction_to_ask(self, tmp_path: Path) -> None:
+        text = render.identity_text(
+            tmp_path, model="openai/gpt-5", ask_available=render.ask_available(lambda: self._defs("ask_user"))
+        )
+        assert "call the `ask_user` tool and wait" in text
+
+    def test_a_disabled_tool_is_replaced_by_deciding_and_saying_so(self, tmp_path: Path) -> None:
+        text = render.identity_text(
+            tmp_path, model="openai/gpt-5", ask_available=render.ask_available(lambda: self._defs("exec"))
+        )
+        assert "`ask_user`" not in text, "the prompt must not name a tool this turn does not hold"
+        assert "decide it, say in one line what you chose and why" in text
+        # The reserved cases survive, because they are the ones the owner cannot answer for.
+        assert "a credential you do not hold" in text
+        assert "approval to spend money" in text
+
+    def test_an_unknowable_surface_still_reads_as_available(self) -> None:
+        """A wiring gap degrades to saying too much, never to deleting the rule."""
+        assert render.ask_available(None) is True
+
+        def broken() -> list[dict]:
+            raise RuntimeError("no table")
+
+        assert render.ask_available(broken) is True
+
+    def test_a_readable_table_says_exactly_what_it_holds(self) -> None:
+        assert render.ask_available(lambda: self._defs("ask_user")) is True
+        assert render.ask_available(lambda: self._defs("exec", "read_file")) is False
+        assert render.ask_available(lambda: []) is False
+
+    async def test_the_builder_passes_the_surface_it_actually_holds(self, tmp_path: Path) -> None:
+        """The wiring, not just the renderer.
+
+        A test that only calls ``identity_text`` cannot see the builder forgetting
+        to pass the flag, which is exactly how the guideline came to name a tool
+        this install had disabled. So this one goes through the builder.
+        """
+        builder = IdentitySegmentBuilder(tmp_path, get_tool_definitions=lambda: self._defs("exec"))
+        assert "`ask_user`" not in (await builder.build(_ctx(tmp_path))).text
+
+        builder = IdentitySegmentBuilder(tmp_path, get_tool_definitions=lambda: self._defs("ask_user"))
+        assert "call the `ask_user` tool and wait" in (await builder.build(_ctx(tmp_path))).text

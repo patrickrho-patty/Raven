@@ -90,5 +90,6 @@ class IdentitySegmentBuilder:
             dispatch_tools=render.live_dispatch_tools(self._get_tool_definitions),
             has_memory_backend=self._has_memory_backend,
             board_shown=render.board_on_page(self._task_board, ctx.channel, ctx.surface),
+            ask_available=render.ask_available(self._get_tool_definitions),
         )
         return Segment(text=text + _task_block(ctx))
