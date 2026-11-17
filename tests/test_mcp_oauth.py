@@ -663,6 +663,42 @@ async def test_callback_unknown_state_rejected():
     assert "stale" in html
 
 
+async def test_a_second_click_on_a_redeemed_link_says_already_connected():
+    """A reload must not report failure for a flow that already succeeded.
+
+    The state is one-shot, so the browser's second visit finds nothing waiting.
+    Saying "stale or already used" there tells someone their authorization
+    failed while the server is connected -- the reader then hunts a problem that
+    does not exist, which is exactly what a reload after a real connect looks like.
+    """
+    flow = _Flow("replay-srv", None)
+    await flow.redirect("https://as.example/authorize?client_id=cid&state=replay-1&code_challenge=x")
+    task = asyncio.create_task(flow.callback())
+    await asyncio.sleep(0)
+    assert resolve_callback({"state": "replay-1", "code": "c"})[0]
+    await task
+
+    matched, html = resolve_callback({"state": "replay-1", "code": "c"})
+    assert matched, "a redeemed link must not answer like a stale one"
+    assert "already connected" in html
+    assert "replay-srv" in html
+
+
+async def test_a_redeemed_state_cannot_be_redeemed_again():
+    """The friendlier page must not put a consumed state back in the queue."""
+    flow = _Flow("once-srv", None)
+    await flow.redirect("https://as.example/authorize?client_id=cid&state=once-1&code_challenge=x")
+    task = asyncio.create_task(flow.callback())
+    await asyncio.sleep(0)
+
+    assert resolve_callback({"state": "once-1", "code": "c"})[0]
+    await task
+    assert "once-1" not in mcp_oauth._PENDING
+
+    assert resolve_callback({"state": "once-1", "code": "c"})[0]
+    assert "once-1" not in mcp_oauth._PENDING, "a replay must not requeue the drained state"
+
+
 async def test_callback_consumed_once(monkeypatch):
     import webbrowser
 
@@ -672,8 +708,16 @@ async def test_callback_consumed_once(monkeypatch):
     task = asyncio.create_task(flow.callback())
     await asyncio.sleep(0)
     assert resolve_callback({"state": "st-1", "code": "c"})[0] is True
-    assert resolve_callback({"state": "st-1", "code": "c"})[0] is False
+    # The second visit is a reload of a flow that already connected, so it gets
+    # the success page rather than the stale-link one. The state is still drained
+    # and the waiter is not resolved again: a friendlier answer must not become a
+    # second redemption.
+    matched, html = resolve_callback({"state": "st-1", "code": "c"})
+    assert matched is True
+    assert "already connected" in html
+    assert "st-1" not in mcp_oauth._PENDING
     await task
+    assert task.result().code == "c"
 
 
 async def test_callback_denial_raises_wait_timeout(monkeypatch):

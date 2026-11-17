@@ -96,6 +96,23 @@ class _Pending(NamedTuple):
 _PENDING: dict[str, _Pending] = {}
 """OAuth ``state`` -> the pending round-trip it will resolve."""
 
+_COMPLETED: dict[str, str] = {}
+"""``state`` -> server, for the flows this process redeemed successfully.
+
+The state is gone from ``_PENDING`` once a callback redeems it, so a reload or
+second click lands on a state nobody is waiting for and used to be told the
+link was stale -- after the first click had already connected. Remembering the
+outcome separates "you already did this" from "this link was never ours",
+without making a consumed state redeemable a second time.
+"""
+
+_COMPLETED_MAX = 64
+"""Bounded: this endpoint is reachable without a session, so it grows on input.
+
+The window only needs to outlast a reader reloading the result page, and a
+capped dict keeps a stream of redirects from retaining every state ever issued.
+"""
+
 
 def redirect_uri() -> str | None:
     return f"{_callback_base}{_CALLBACK_PATH}" if _callback_base else None
@@ -197,12 +214,19 @@ async def _ensure_callback_endpoint() -> str:
 def resolve_callback(query: dict[str, Any]) -> tuple[bool, str]:
     """Resolve a redirect hitting ``/oauth/callback``.
 
-    Returns ``(matched, html_page)``. Unknown/consumed ``state`` values get
-    a failure page — a one-shot future can never be redeemed twice.
+    Returns ``(matched, html_page)``. Unknown ``state`` values get a failure
+    page -- a one-shot future can never be redeemed twice. A state this process
+    already redeemed gets a success page instead: the browser reloads, the reader
+    clicks twice, a second tab still holds the link, and the first click did
+    connect, so calling that a failure sends them looking for a problem that is
+    not there.
     """
     state = str(query.get("state") or "")
     entry = _PENDING.pop(state, None)
     if entry is None:
+        connected = _COMPLETED.get(state)
+        if connected is not None:
+            return True, _page(True, f"Raven is already connected to {connected}. You can close this page.")
         return False, _page(False, "This authorization link is stale or was already used.")
     server, fut = entry.server, entry.future
     if fut.done():
@@ -221,6 +245,9 @@ def resolve_callback(query: dict[str, Any]) -> tuple[bool, str]:
     # empty string reads as present and fails the issuer comparison instead.
     iss = query.get("iss")
     fut.set_result((code, state, str(iss) if iss else None))
+    _COMPLETED[state] = server
+    while len(_COMPLETED) > _COMPLETED_MAX:
+        _COMPLETED.pop(next(iter(_COMPLETED)))
     return True, _page(True, f"Raven is now connected to {server}. You can close this page.")
 
 
