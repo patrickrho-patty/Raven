@@ -75,6 +75,25 @@ describe('the reasoning effort', () => {
     expect(effort.scopeNote()).toBe('gui.effort.scope gui.effort.now {"name":"gui.effort.provider"} gui.effort.kept')
   })
 
+  it('says where a default above what this model takes actually runs', async () => {
+    /* The install asks for max, the model tops out at high. The word is kept --
+       a model that offers it later gets it -- but this one runs at high, and the
+       row has to say so rather than leave "default is Max" standing for a level
+       the provider never sees. */
+    answer = async () => ({ effort: null, default: 'max', default_effective: 'high', options: WORDS })
+    await effort.load()
+    expect(effort.fallback()).toBe('max')
+    expect(effort.scopeNote()).toBe(
+      'gui.effort.scope gui.effort.now {"name":"gui.effort.max"} gui.effort.kept gui.effort.capped {"name":"gui.effort.high"}',
+    )
+  })
+
+  it('adds nothing when the model takes the configured word as it stands', async () => {
+    answer = async () => ({ effort: null, default: 'high', default_effective: 'high', options: WORDS })
+    await effort.load()
+    expect(effort.scopeNote()).toBe('gui.effort.scope gui.effort.now {"name":"gui.effort.high"} gui.effort.kept')
+  })
+
   it('reads the conversation it was given under the switch it was given, not the one on screen', async () => {
     /* A switch asks for the conversation being opened before the page's
        current session moves over to it: the source is told which, so it does

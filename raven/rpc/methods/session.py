@@ -569,9 +569,10 @@ def _default_effort(agent_loop: object, config: Any, session_key: str | None) ->
 
     ``session_effort.in_force`` ranks it, the same rule the turn runs at, so
     what this reports and what the next turn sends cannot drift apart: None is
-    the provider's own default on both sides. The model does not narrow this
-    answer -- the mode's word and the configured default are sent as they
-    stand, unlike a pick.
+    the provider's own default on both sides. This is the word as configured;
+    the model narrows it at the turn (``WiringMixin.session_reasoning_effort``),
+    and the reply carries that answer beside this one as ``default_effective``
+    so a page can say when the two differ.
     """
     return session_effort.in_force(None, _mode_effort(agent_loop, session_key), _configured_effort(config))
 
@@ -1748,10 +1749,16 @@ async def session_set_effort(
     )
 
     def _reply(stored: str | None) -> dict:
+        # The word the config states, and what this model will actually run at:
+        # the same narrowing the turn applies, so the page can say "default is
+        # max, this model tops out at high" instead of claiming a level the
+        # provider will never see.
+        configured = _default_effort(loop, config, session_key or None)
         return {
             "session_key": session_key,
             "effort": session_effort.downgrade(stored, model_levels),
-            "default": _default_effort(loop, config, session_key or None),
+            "default": configured,
+            "default_effective": session_effort.downgrade(configured, model_levels),
             "options": list(model_levels) if model_levels is not None else list(REASONING_EFFORTS),
         }
 

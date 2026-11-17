@@ -2743,3 +2743,33 @@ async def test_an_effort_set_refreshes_the_codex_catalogue(tmp_path, monkeypatch
     )
     assert result["effort"] == "high"
     assert calls == [("gpt-5.6-sol", True)]
+
+
+async def test_the_effort_reply_says_where_a_capped_default_actually_runs(fake_home: Path) -> None:
+    """A default above what the model declares is reported both ways.
+
+    The configured word is still what the install asks for -- a model that offers
+    it later takes it -- but this model does not, and the turn narrows it. Saying
+    only "the default is max" would claim a level the provider never sees.
+    """
+    from raven.rpc.methods.session import session_set_effort
+    from raven.session.manager import SessionManager
+
+    _write_config(fake_home, {"agents": {"defaults": {"reasoningEffort": "max"}}})
+    await model_add_model({"slug": "anthropic", "model": "mine", "reasoning_efforts": ["low", "high"]})
+
+    class _Loop:
+        def __init__(self, path: Path) -> None:
+            self.sessions = SessionManager(path)
+
+        def session_policy(self, key):
+            from raven.agent.loop._shared import SessionPolicy
+
+            return SessionPolicy()
+
+    result = await session_set_effort(
+        {"session_key": "", "model": "anthropic/mine"},
+        agent_loop_factory=lambda: _Loop(fake_home),
+    )
+    assert result["default"] == "max", "the configured word is still reported"
+    assert result["default_effective"] == "high", "this model tops out at high"

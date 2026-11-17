@@ -455,13 +455,36 @@ def _live_with_effort(tmp_path, effort: str) -> LiveConfig:
     return LiveConfig(path)
 
 
-async def test_a_model_with_no_row_still_gets_the_configured_effort(tmp_path, monkeypatch):
-    """Only a pick is bounded by what the model declares; the configured
-    default was sent on main and keeps being sent for models the table lacks."""
+async def test_a_model_that_declares_no_reasoning_narrows_the_configured_default_to_none(tmp_path, monkeypatch):
+    """``()`` is the table saying this model has no reasoning at all.
+
+    Sending the configured word anyway asks for thinking the model cannot do, so
+    the default narrows to None -- the provider's own default -- exactly as an
+    undeclared pick does. ``levels_for`` answers ``()`` only for a row that says
+    ``supports_reasoning: False``; an id it cannot find is ``None`` and is handled
+    by the test below.
+    """
     from raven.agent.loop import wiring
 
     monkeypatch.setattr(
         wiring.effort_levels, "levels_for", lambda model, declared=(), *, provider=None, refresh=False: ()
+    )
+    loop = _loop(tmp_path, _ScriptedProvider([_text("ok")]))
+    loop._live_config = _live_with_effort(tmp_path, "high")
+    assert loop.session_reasoning_effort("cli:c") is None
+
+
+async def test_a_model_the_table_does_not_describe_keeps_the_configured_default(tmp_path, monkeypatch):
+    """``None`` levels mean the table could not answer, which is not a model answer.
+
+    Failing open here is what keeps a reseller gateway's own model ids usable:
+    narrowing on an answer nobody gave would silently run every one of them at the
+    provider default.
+    """
+    from raven.agent.loop import wiring
+
+    monkeypatch.setattr(
+        wiring.effort_levels, "levels_for", lambda model, declared=(), *, provider=None, refresh=False: None
     )
     loop = _loop(tmp_path, _ScriptedProvider([_text("ok")]))
     loop._live_config = _live_with_effort(tmp_path, "high")
@@ -612,3 +635,48 @@ async def test_the_turn_reads_a_codex_accounts_levels_from_the_cache(tmp_path, m
     )
     assert loop.session_reasoning_effort("cli:c", "high") == "high"
     assert calls == [("gpt-5.6-sol", False)]
+
+
+@pytest.mark.asyncio
+async def test_the_configured_default_is_narrowed_to_what_the_model_declares(tmp_path, monkeypatch):
+    """A default of ``max`` on a model that tops out at ``high`` sends ``high``.
+
+    Widening the install default to the full ladder let the word outrank what
+    most models declare. The pick was already narrowed here; the default was
+    handed to ``in_force`` as written, which asked the provider for a level it
+    does not have -- survivable while the default stopped at ``high``, and not
+    once ``max`` became the one word most installs want.
+    """
+    from raven.agent.loop import wiring
+
+    provider = _ScriptedProvider([_text("done")])
+    loop = _loop(tmp_path, provider)
+    monkeypatch.setattr(
+        wiring.effort_levels,
+        "levels_for",
+        lambda model, declared=(), *, provider=None, refresh=False: ("minimal", "low", "medium", "high"),
+    )
+    monkeypatch.setattr(type(loop), "default_reasoning_effort", property(lambda self: "max"))
+
+    await loop._process_message(_req())
+
+    assert provider.calls[0]["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_a_default_the_model_declares_is_sent_as_written(tmp_path, monkeypatch):
+    """The narrowing must not lower a word the model actually takes."""
+    from raven.agent.loop import wiring
+
+    provider = _ScriptedProvider([_text("done")])
+    loop = _loop(tmp_path, provider)
+    monkeypatch.setattr(
+        wiring.effort_levels,
+        "levels_for",
+        lambda model, declared=(), *, provider=None, refresh=False: ("low", "medium", "high", "max"),
+    )
+    monkeypatch.setattr(type(loop), "default_reasoning_effort", property(lambda self: "max"))
+
+    await loop._process_message(_req())
+
+    assert provider.calls[0]["reasoning_effort"] == "max"

@@ -6483,6 +6483,10 @@
       "en": "A pick the current model does not offer is kept, and the provider's own default runs until a model offers it.",
       "zh": "当前模型不提供已保存的档位时会保留该档位，在模型提供之前使用厂商默认。"
     },
+    "gui.effort.capped": {
+      "en": "This model tops out at {name}, so it runs there.",
+      "zh": "该模型最高只到{name}，因此按此档位运行。"
+    },
     "gui.effort.provider": {
       "en": "the provider's own default",
       "zh": "厂商默认"

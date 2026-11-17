@@ -33,6 +33,10 @@ export interface EffortReply {
   effort?: string | null
   /** What it runs at without a pick; null for the provider's own default. */
   default?: string | null
+  /** The same default as this model takes it. Differs from `default` when the
+   *  configured word is above what the model declares: the turn narrows it, so
+   *  this is the word that actually reaches the provider. */
+  default_effective?: string | null
   /** The words `effort` accepts, least first. */
   options?: string[]
 }
@@ -69,10 +73,12 @@ export interface EffortState {
   readonly effort: string
   /** What the session runs at without a pick, or '' for the provider's own. */
   readonly fallback: string
+  /** The same default narrowed to what this model declares; '' when unknown. */
+  readonly fallbackEffective: string
   readonly options: readonly string[]
 }
 
-const shut: EffortState = { loaded: false, effort: '', fallback: '', options: [] }
+const shut: EffortState = { loaded: false, effort: '', fallback: '', fallbackEffective: '', options: [] }
 const store = makeStore<EffortState>(shut)
 
 /** The store's state, for the row's useSyncExternalStore, and the page's
@@ -122,10 +128,17 @@ export const heading = (): string => t('gui.effort.title')
 
 /* One sentence on what the row moves, and one on what the default rung stands
    for right now -- which is a fact about this install, so the row says it
-   rather than leaving "default" to mean anything. */
+   rather than leaving "default" to mean anything. When the configured default
+   outranks this model, a third sentence says where it actually runs: the word
+   is still held (a model that offers it later gets it), but this model does not
+   take it, and saying only "default is Max" would claim a level the provider
+   never sees. */
 export const scopeNote = (): string => {
-  const now = get().fallback ? label(get().fallback) : t('gui.effort.provider')
-  return `${t('gui.effort.scope')} ${t('gui.effort.now', { name: now })} ${t('gui.effort.kept')}`
+  const { fallback, fallbackEffective } = get()
+  const now = fallback ? label(fallback) : t('gui.effort.provider')
+  const base = `${t('gui.effort.scope')} ${t('gui.effort.now', { name: now })} ${t('gui.effort.kept')}`
+  if (!fallback || !fallbackEffective || fallbackEffective === fallback) return base
+  return `${base} ${t('gui.effort.capped', { name: label(fallbackEffective) })}`
 }
 
 function absorb(reply: EffortReply | null | undefined): void {
@@ -135,6 +148,7 @@ function absorb(reply: EffortReply | null | undefined): void {
     loaded: true,
     effort: typeof reply.effort === 'string' ? reply.effort : '',
     fallback: typeof reply.default === 'string' ? reply.default : '',
+    fallbackEffective: typeof reply.default_effective === 'string' ? reply.default_effective : '',
     options: words,
   })
 }

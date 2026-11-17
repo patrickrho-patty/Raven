@@ -542,13 +542,20 @@ class WiringMixin:
         read off the session's record, the session's mode's word, and the
         configured default as the file has it now. ``model`` is the id the loop
         was handed for this turn -- the router's pick when it made one, else the
-        session's own -- and bounds the **pick** (``session_effort.downgrade``):
-        a level it does not declare, by LiteLLM's table or its provider
-        overlay, runs at the highest level it does declare below it, and is
-        dropped only when it declares nothing at or below. The mode's word and
-        the configured default are not narrowed here; they are not this
-        conversation's pick and were sent as they stand before the pick
-        existed. Beside ``session_tier`` for
+        session's own -- and bounds the **pick** and the **configured default**
+        (``session_effort.downgrade``): a level the model does not declare, by
+        LiteLLM's table or its provider overlay, runs at the highest level it
+        does declare below it, and is dropped only when it declares nothing at
+        or below. The mode's word is not narrowed: it is a policy the operator
+        wrote for this session, not a word chosen against a model.
+
+        The default is narrowed because it can now name ``max``
+        (``config/schema.REASONING_EFFORTS``). An install-wide word outranks what
+        most models declare, so sending it unstripped asks a provider for a
+        level it does not have -- which was survivable while the default stopped
+        at ``high`` and is not now.
+
+        Beside ``session_tier`` for
         the reason it gives -- the turn and the RPC need the one rule, and the
         policy it reads lives here -- and reached on ``self`` by the turn, so
         nothing imports anything new.
@@ -593,7 +600,7 @@ class WiringMixin:
         return session_effort.in_force(
             valid_pick,
             self.session_policy(session_key or "").reasoning_effort,
-            self.default_reasoning_effort,
+            session_effort.downgrade(self.default_reasoning_effort, levels),
         )
 
     @property
