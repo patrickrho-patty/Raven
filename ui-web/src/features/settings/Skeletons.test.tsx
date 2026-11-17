@@ -61,11 +61,11 @@ describe('the wait a settings section draws', () => {
   it('draws the section rather than a box with a word in it', async () => {
     await waiting('general')
     /* The box this replaces, whose height was a line of text where the page is
-       two settings, the second a row of theme cards. */
+       three settings, the last a row of theme cards. */
     expect(document.querySelector('.settings-soonbox')).toBeNull()
-    expect(count('.settings-gen')).toBe(2)
+    expect(count('.settings-gen')).toBe(3)
     expect(count('.settings-theme')).toBe(3)
-    expect(count('.settings-wbar')).toBe(11)
+    expect(count('.settings-wbar')).toBe(14)
   })
 
   it('gives every section a shape of its own, so none falls through to the default', async () => {

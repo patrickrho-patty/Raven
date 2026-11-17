@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as look from '../../../state/look'
 import { resetSources, setSources } from '../../../state/sources'
-import { install, modelSource, mount, source as settingsSource } from '../../../test/settingsHarness'
+import { install, modelSource, mount, snap, source as settingsSource } from '../../../test/settingsHarness'
 import * as store from '../store'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -28,6 +28,23 @@ afterEach(() => {
 })
 
 describe('general page', () => {
+  it('the approval pick writes the install default, so a new conversation starts there', async () => {
+    const { calls } = install()
+    await mount('general')
+    await act(async () => { fireEvent.click(screen.getByText('gui.perm.full')) })
+    /* `settings.set` writes the config key, which is the default a conversation
+       with no mode of its own reads -- not a session-scoped `config.set`, which
+       is what the composer's chip writes and what a new chat does not inherit. */
+    expect(calls).toEqual([['set', { key: 'permissions.mode', value: 'full' }]])
+  })
+
+  it('the approval pick paints the mode already in the config', async () => {
+    install({ ...snap(), raw: { ...snap().raw, permissions: { mode: 'ask' } } })
+    await mount('general')
+    const picked = screen.getByText('gui.perm.ask').closest('button')!
+    expect(picked.getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('the language pick goes to the source, which owns what a flip means', async () => {
     const { calls } = install()
     await mount('general')

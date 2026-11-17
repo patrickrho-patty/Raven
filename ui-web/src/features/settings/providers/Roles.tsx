@@ -405,6 +405,7 @@ const EFFORTS: Array<[string, string]> = [
   ['', 'gui.settings.roles.effort_default'],
   ['minimal', 'gui.settings.roles.effort_minimal'], ['low', 'gui.settings.roles.effort_low'],
   ['medium', 'gui.settings.roles.effort_medium'], ['high', 'gui.settings.roles.effort_high'],
+  ['xhigh', 'gui.settings.roles.effort_xhigh'], ['max', 'gui.settings.roles.effort_max'],
 ]
 
 const effortWord = (v: string): string =>

@@ -882,15 +882,18 @@ TIER_LADDER: tuple[str, ...] = ("medium", "high", "max")
 """The built-in tiers, cheapest first. The order is what makes a clamp possible,
 so it is a constant here rather than something read back off the catalogue."""
 
-REASONING_EFFORTS: tuple[str, ...] = ("minimal", "low", "medium", "high")
+REASONING_EFFORTS: tuple[str, ...] = ("minimal", "low", "medium", "high", "xhigh", "max")
 """The words ``agents.defaults.reasoningEffort`` accepts, least first: the
-install-wide default. A session's own pick is checked against the levels its
-model declares (``providers/effort_levels.py``), which may also carry
-``xhigh``/``max``; this list is that picker's fallback only when the LiteLLM
-table cannot be read. Each provider maps a word to its own wire -- the adaptive
-efforts and thinking budgets in
-``providers/anthropic_messages_provider.py``, ``reasoning_effort`` on the
-OpenAI-shaped ones -- and a model with no thinking to move ignores it."""
+install-wide default. The full ladder, not the four baseline rungs: the install
+default and a session's own pick were two vocabularies for one question, so the
+default could not name what the picker offered -- ``max`` was reachable on a
+conversation and unstateable as the default. A model that declares less than
+the word runs at the highest level it does declare
+(``providers/effort_levels.downgrade``), which is what makes a wide install
+default safe over a fleet of models: it says how much thinking the reader
+wants, not what every model must take. ``contracts/llm_provider.REASONING_EFFORT_LADDER``
+remains the one place the words are ordered, and this list is that fallback
+picker for a model the table cannot describe."""
 
 ROUTE_REQUIREMENTS: tuple[str, ...] = ("image_generation", "image_search")
 """What a route may declare its target's own pipeline spends.

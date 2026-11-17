@@ -8235,6 +8235,14 @@
       "en": "About",
       "zh": "关于"
     },
+    "gui.settings.general.approval": {
+      "en": "Approval mode",
+      "zh": "审批模式"
+    },
+    "gui.settings.general.approval_sub": {
+      "en": "What every new conversation starts at. Deny rules still apply in every mode, and Full access never asks.",
+      "zh": "每个新对话开始时的模式。各模式下 deny 规则仍然生效，完全访问从不询问。"
+    },
     "gui.settings.general.language": {
       "en": "Language",
       "zh": "语言"
@@ -9018,6 +9026,14 @@
     "gui.settings.roles.effort_high": {
       "en": "High",
       "zh": "高"
+    },
+    "gui.settings.roles.effort_xhigh": {
+      "en": "Extra high",
+      "zh": "超高度"
+    },
+    "gui.settings.roles.effort_max": {
+      "en": "Max",
+      "zh": "最大"
     },
     "gui.settings.roles.iterations": {
       "en": "Tool iteration cap",

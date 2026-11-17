@@ -322,6 +322,7 @@ const SHAPE: Partial<Record<SectionId, () => JSX.Element>> = {
     <Wait>
       <div className="settings-genlist">
         <WGen ctl={<Bar w="120px" h={30} />} />
+        <WGen ctl={<Bar w="120px" h={30} />} />
         <WGen
           below
           ctl={(

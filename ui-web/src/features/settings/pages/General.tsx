@@ -17,6 +17,7 @@
 import { code as langCode, t } from '../../../i18n/t'
 import * as look from '../../../state/look'
 import { Seg } from '../Fields'
+import { dig } from '../source'
 import * as store from '../store'
 
 import type { JSX, ReactNode } from 'react'
@@ -24,6 +25,12 @@ import type { JSX, ReactNode } from 'react'
 type Theme = 'system' | 'light' | 'dark'
 
 const THEMES: Theme[] = ['system', 'light', 'dark']
+
+/* The approval modes, least permissive first. The words are the config's own
+   (``permissions.mode``), so the row reads and writes one vocabulary. */
+const MODES: Array<[string, string]> = [
+  ['ask', 'gui.perm.ask'], ['smart', 'gui.perm.smart'], ['full', 'gui.perm.full'],
+]
 
 const SHOT = { light: 'settings-shot', dark: 'settings-shot settings-shot-dark' }
 
@@ -67,8 +74,17 @@ function Preview({ theme }: { theme: Theme }): JSX.Element {
 
 export function General(): JSX.Element {
   const theme = look.get().theme as Theme
+  const snap = store.get().snap
+  const mode = String(dig(snap.raw, 'permissions.mode') || 'smart')
   return (
     <div className="settings-genlist">
+      <Setting title={t('gui.settings.general.approval')} sub={t('gui.settings.general.approval_sub')}>
+        <Seg
+          opts={MODES.map(([v, key]): [string, string] => [v, t(key)])}
+          value={mode}
+          onPick={(v) => void store.write('permissions.mode', v)}
+        />
+      </Setting>
       <Setting title={t('gui.settings.general.language')} sub={t('gui.settings.general.language_sub')}>
         <Seg
           opts={[['zh', t('gui.settings.general.lang_zh')], ['en', t('gui.settings.general.lang_en')]]}

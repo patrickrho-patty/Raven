@@ -123,6 +123,7 @@ def test_find_prefers_an_exact_entry_and_binds_wildcards():
         ("agents.defaults.contextWindowTokens", None, True),
         ("agents.defaults.reasoningEffort", None, True),
         ("agents.defaults.reasoningEffort", "high", True),
+        ("agents.defaults.reasoningEffort", "max", True),
         ("agents.defaults.reasoningEffort", "ultra", False),
         ("tools.exec.timeout", None, False),
         ("agents.defaults.model", {"provider": "openrouter", "model": "x/y"}, True),

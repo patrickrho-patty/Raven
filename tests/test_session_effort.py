@@ -83,6 +83,23 @@ def test_downgrade_keeps_a_declared_value() -> None:
     assert session_effort.downgrade("high", ("minimal", "low", "medium", "high")) == "high"
 
 
+def test_the_install_default_can_name_every_level_the_picker_offers() -> None:
+    """One vocabulary for one question.
+
+    The install default and a session's own pick used to be two lists: the pick
+    could be ``max`` while ``agents.defaults.reasoningEffort`` stopped at
+    ``high``, so a reader who wanted as much thinking as the model takes could
+    set it on one conversation and not as the default. Widening the default is
+    safe only because ``downgrade`` runs it at the highest level each model
+    actually declares.
+    """
+    from raven.config.schema import REASONING_EFFORTS
+    from raven.contracts.llm_provider import REASONING_EFFORT_LADDER
+
+    assert REASONING_EFFORTS == tuple(reversed(REASONING_EFFORT_LADDER))
+    assert REASONING_EFFORTS[-1] == "max"
+
+
 def test_downgrade_runs_an_undeclared_value_at_the_highest_declared_below_it() -> None:
     assert session_effort.downgrade("max", ("minimal", "low", "medium", "high")) == "high"
     assert session_effort.downgrade("xhigh", ("low", "high", "max")) == "high"
